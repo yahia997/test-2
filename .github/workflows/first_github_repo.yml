@@ -19,9 +19,9 @@ jobs:
           mkdir -p reports
           SUBMISSION_ID="${{ github.event.client_payload.submission_id }}"
           if [ -f "student-code/a.txt" ]; then
-            echo "{\"submission_id\": \"$SUBMISSION_ID\", \"status\": \"Passed\", \"message\": \"a.txt found\"}" > "reports/$SUBMISSION_ID.json"
+            echo "{\"submission_id\": \"$SUBMISSION_ID\", \"passed\": 1, \"total\": 1, \"results\": {\"message\": \"a.txt found\"}}" > "reports/$SUBMISSION_ID.json"
           else
-            echo "{\"submission_id\": \"$SUBMISSION_ID\", \"status\": \"Failed\", \"message\": \"a.txt not found\"}" > "reports/$SUBMISSION_ID.json"
+            echo "{\"submission_id\": \"$SUBMISSION_ID\", \"passed\": 0, \"total\": 1, \"results\": {\"message\": \"a.txt not found\"}}" > "reports/$SUBMISSION_ID.json"
           fi
 
       - name: Upload report
