@@ -2,7 +2,7 @@ name: Evaluate Student Submission
 
 on:
   repository_dispatch:
-    types: [first_github_repo]
+    types: [diff]
 
 jobs:
   evaluate:
@@ -31,39 +31,73 @@ jobs:
         if: steps.checkout.outcome == 'success'
         run: |
           mkdir -p reports
-
           SUBMISSION_ID="${{ github.event.client_payload.submission_id }}"
 
-          # --------------------------------------------------------
-          # Example evaluation
-          # --------------------------------------------------------
-          if [ -f "student-code/a.txt" ]; then
+          cd student-code
 
-            cat > reports/$SUBMISSION_ID.json <<EOF
-          {
-            "submission_id": "$SUBMISSION_ID",
-            "passed": 1,
-            "total": 1,
-            "results": {
-              "message": "a.txt found"
-            }
-          }
-          EOF
+          PASSED=0
+          TOTAL=5
+          declare -A CHECKS
 
+          # 1. Both diff report files exist and are tracked
+          if git ls-files --error-unmatch diff_reports/unstaged.diff > /dev/null 2>&1 \
+             && git ls-files --error-unmatch diff_reports/staged.diff > /dev/null 2>&1; then
+            CHECKS[diff_files_tracked]="pass"; PASSED=$((PASSED+1))
           else
+            CHECKS[diff_files_tracked]="fail"
+          fi
 
-            cat > reports/$SUBMISSION_ID.json <<EOF
+          # 2. unstaged.diff actually looks like a real git diff (has diff headers)
+          if [ -f "diff_reports/unstaged.diff" ] && grep -q "^diff --git" diff_reports/unstaged.diff; then
+            CHECKS[unstaged_diff_valid]="pass"; PASSED=$((PASSED+1))
+          else
+            CHECKS[unstaged_diff_valid]="fail"
+          fi
+
+          # 3. staged.diff actually looks like a real git diff too
+          if [ -f "diff_reports/staged.diff" ] && grep -q "^diff --git" diff_reports/staged.diff; then
+            CHECKS[staged_diff_valid]="pass"; PASSED=$((PASSED+1))
+          else
+            CHECKS[staged_diff_valid]="fail"
+          fi
+
+          # 4. Both diffs reference hello.txt and the actual added line
+          if grep -q "hello.txt" diff_reports/unstaged.diff 2>/dev/null \
+             && grep -q "a brand new unstaged line" diff_reports/unstaged.diff 2>/dev/null \
+             && grep -q "hello.txt" diff_reports/staged.diff 2>/dev/null \
+             && grep -q "a brand new unstaged line" diff_reports/staged.diff 2>/dev/null; then
+            CHECKS[diff_content_correct]="pass"; PASSED=$((PASSED+1))
+          else
+            CHECKS[diff_content_correct]="fail"
+          fi
+
+          # 5. The final commit actually contains the real change to hello.txt
+          #    (proves they didn't just fake the diff files without making the real edit)
+          if git log -p -1 --pretty=format: -- git_github/hello.txt | grep -q "a brand new unstaged line"; then
+            CHECKS[real_change_committed]="pass"; PASSED=$((PASSED+1))
+          else
+            CHECKS[real_change_committed]="fail"
+          fi
+
+          cd ..
+
+          RESULTS_JSON="{"
+          FIRST=1
+          for key in "${!CHECKS[@]}"; do
+            if [ $FIRST -eq 0 ]; then RESULTS_JSON+=","; fi
+            RESULTS_JSON+="\"$key\": \"${CHECKS[$key]}\""
+            FIRST=0
+          done
+          RESULTS_JSON+="}"
+
+          cat > reports/$SUBMISSION_ID.json <<EOF
           {
             "submission_id": "$SUBMISSION_ID",
-            "passed": 0,
-            "total": 1,
-            "results": {
-              "message": "a.txt not found"
-            }
+            "passed": $PASSED,
+            "total": $TOTAL,
+            "results": $RESULTS_JSON
           }
           EOF
-
-          fi
 
       # ------------------------------------------------------------
       # 3. Repository couldn't be cloned

@@ -2,7 +2,7 @@ name: Evaluate Student Submission
 
 on:
   repository_dispatch:
-    types: [git_clone]
+    types: [gitignore]
 
 jobs:
   evaluate:
@@ -19,6 +19,7 @@ jobs:
         with:
           repository: ${{ github.event.client_payload.student_repo_link }}
           path: student-code
+          fetch-depth: 0
 
       # ------------------------------------------------------------
       # 2. Clone reference libgit2 repo for comparison
@@ -33,57 +34,91 @@ jobs:
       # 3. Evaluate submission
       # ------------------------------------------------------------
       - name: Run evaluation
-        if: steps.checkout.outcome == 'success' && steps.reference.outcome == 'success'
+        if: steps.checkout.outcome == 'success'
         run: |
           mkdir -p reports
           SUBMISSION_ID="${{ github.event.client_payload.submission_id }}"
 
+          cd student-code
+
           PASSED=0
-          TOTAL=3
+          TOTAL=7
+          declare -A CHECKS
 
-          # Check 1: key libgit2 files/folders exist
-          if [ -f "student-code/include/git2.h" ] && [ -d "student-code/src" ] && [ -f "student-code/CMakeLists.txt" ]; then
-            CHECK1=true
-            PASSED=$((PASSED+1))
+          # --- Rule presence checks (is .gitignore even written correctly?) ---
+
+          # 1. build/ directory rule
+          if grep -qE '(^|/)build/?$' .gitignore 2>/dev/null; then
+            CHECKS[build_rule]="pass"; PASSED=$((PASSED+1))
           else
-            CHECK1=false
+            CHECKS[build_rule]="fail"
           fi
 
-          # Check 2: checksum of a stable, unlikely-to-be-edited file matches upstream
-          if [ -f "student-code/COPYING" ] && [ -f "reference-code/COPYING" ]; then
-            HASH_STUDENT=$(sha256sum student-code/COPYING | awk '{print $1}')
-            HASH_REF=$(sha256sum reference-code/COPYING | awk '{print $1}')
-            if [ "$HASH_STUDENT" == "$HASH_REF" ]; then
-              CHECK2=true
-              PASSED=$((PASSED+1))
-            else
-              CHECK2=false
+          # 2. *.log with !lib.log negation
+          if grep -qE '^\*\.log$' .gitignore 2>/dev/null && grep -qE '^!lib\.log$' .gitignore 2>/dev/null; then
+            CHECKS[log_negation_rule]="pass"; PASSED=$((PASSED+1))
+          else
+            CHECKS[log_negation_rule]="fail"
+          fi
+
+          # 3. anchored /TODO rule
+          if grep -qE '^/TODO$' .gitignore 2>/dev/null; then
+            CHECKS[anchored_todo_rule]="pass"; PASSED=$((PASSED+1))
+          else
+            CHECKS[anchored_todo_rule]="fail"
+          fi
+
+          # 4. docs/**/z nested rule (accepts assets/a/**/z or similar double-star pattern)
+          if grep -qE 'assets/a/\*\*/z' .gitignore 2>/dev/null; then
+            CHECKS[nested_doublestar_rule]="pass"; PASSED=$((PASSED+1))
+          else
+            CHECKS[nested_doublestar_rule]="fail"
+          fi
+
+          # --- Behavioral checks (did it actually work, not just written on paper?) ---
+
+          UNTRACKED_OK="pass"
+          for f in build/output.o debug.log git_github/debug.log TODO docs/notes.txt assets/a/z assets/a/b/z assets/a/b/c/z; do
+            if git ls-files --error-unmatch "$f" > /dev/null 2>&1; then
+              UNTRACKED_OK="fail"
             fi
+          done
+          CHECKS[unwanted_files_not_tracked]="$UNTRACKED_OK"
+          [ "$UNTRACKED_OK" = "pass" ] && PASSED=$((PASSED+1))
+
+          TRACKED_OK="pass"
+          for f in lib.log git_github/TODO docs/server/arch.txt; do
+            if ! git ls-files --error-unmatch "$f" > /dev/null 2>&1; then
+              TRACKED_OK="fail"
+            fi
+          done
+          CHECKS[wanted_files_tracked]="$TRACKED_OK"
+          [ "$TRACKED_OK" = "pass" ] && PASSED=$((PASSED+1))
+
+          if git ls-files --error-unmatch .gitignore > /dev/null 2>&1; then
+            CHECKS[gitignore_tracked]="pass"; PASSED=$((PASSED+1))
           else
-            CHECK2=false
+            CHECKS[gitignore_tracked]="fail"
           fi
 
-          # Check 3: total file count is close to the reference repo's
-          STUDENT_COUNT=$(find student-code -type f | wc -l)
-          REF_COUNT=$(find reference-code -type f | wc -l)
-          DIFF=$(( STUDENT_COUNT > REF_COUNT ? STUDENT_COUNT - REF_COUNT : REF_COUNT - STUDENT_COUNT ))
-          if [ "$DIFF" -le 5 ]; then
-            CHECK3=true
-            PASSED=$((PASSED+1))
-          else
-            CHECK3=false
-          fi
+          cd ..
+
+          # Build JSON results object from associative array
+          RESULTS_JSON="{"
+          FIRST=1
+          for key in "${!CHECKS[@]}"; do
+            if [ $FIRST -eq 0 ]; then RESULTS_JSON+=","; fi
+            RESULTS_JSON+="\"$key\": \"${CHECKS[$key]}\""
+            FIRST=0
+          done
+          RESULTS_JSON+="}"
 
           cat > reports/$SUBMISSION_ID.json <<EOF
           {
             "submission_id": "$SUBMISSION_ID",
             "passed": $PASSED,
             "total": $TOTAL,
-            "results": {
-              "key_files_exist": $CHECK1,
-              "license_checksum_match": $CHECK2,
-              "file_count_close": $CHECK3
-            }
+            "results": $RESULTS_JSON
           }
           EOF
 

@@ -20,18 +20,3 @@ specify the new directory name as an additional argument:
 ```bash
 git clone https://github.com/libgit2/libgit2 mylibgit
 ```
-
-# Task
-
-To pass this phase you should: 
-1. create a new repository into your github account.
-2. clone the repo: `https://github.com/libgit2/libgit2`.
-3. Then push changes to you github.
-
-<details>
-<summary>Hints</summary>
-
-- Use `git add .` and `git commit -m "messege"` to track the clones repo.
-- Use `git push` to push to your remote repository.
-
-</details>
