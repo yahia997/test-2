@@ -3,4 +3,4 @@ build/
 !lib.log
 /TODO
 docs/notes.txt
-assets/a/**/z
+assets/a/z
