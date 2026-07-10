@@ -1,0 +1,6 @@
+build/
+*.log
+!lib.log
+/TODO
+docs/notes.txt
+assets/a/**/z
